@@ -1,0 +1,472 @@
+---
+title: "Appendix"
+author: "Dennis Myasnyankin"
+date: "2022-08-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(reticulate)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r global.options, include=FALSE}
+knitr::opts_chunk$set(
+  cache = TRUE,
+  fig.align = 'center',
+  fig.path = 'figs/',
+  echo = TRUE,
+  message = FALSE,
+  strip.white = TRUE,
+  warning = FALSE
+)
+```
+
+**\textcolor{blue}{Exploratory Data Analysis}**
+
+*\textcolor{blue}{Use the newAirlines.csv files}*
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+library(corrplot)
+library(OneR)
+library(caret)
+library(kableExtra)
+library(ROCR)
+
+airlines = read.csv('newAirlines.csv');
+```
+
+**\textcolor{blue}{Initial Data Analysis}**
+
+*\textcolor{blue}{Boxplot of Airline and Length}*
+
+```{r}
+# Airline and Length
+ggplot(data = airlines, mapping = aes(x = Airline, y = Length)) +
+  geom_boxplot(fill = "lightblue") + geom_point(color = "darkblue")
+```
+
+This boxplot of Airlines (x-axis) and Length (y-axis) illustrate what the general distribution and variance of flight lengths look like for each Airline. (Density visualization...)
+
+*\textcolor{blue}{Barplots of Most Popular Departure and Arrival Airports}*
+
+```{r}
+# Group by AirportFrom iata codes
+fromGroups <- airlines %>%
+  group_by(AirportFrom) %>%
+  summarise(amount = n()) %>%
+  arrange(desc(amount))
+# Get top 10
+fromGroups <- fromGroups[1:10,]
+
+# Group by AirportTo iata codes
+toGroups <- airlines %>%
+  group_by(AirportTo) %>%
+  summarise(amount = n()) %>%
+  arrange(desc(amount))
+# Get top 10
+toGroups <- toGroups[1:10,]
+
+colors = c("darkblue", "red")
+# Bar Plot of Delayed Flight counts per Departure Airport
+barplot(height = fromGroups$amount, names = fromGroups$AirportFrom, 
+        main = "Most Popular Departure Airports", ylab = "Count", 
+        xlab = "Departure Airport", ylim = c(0, 40000), col=colors, las = 2)
+
+# Bar Plot of Delayed Flight counts per Arrival Airport
+barplot(height = toGroups$amount, names = toGroups$AirportTo, 
+        main = "Most Popular Arrival Airports", ylab = "Count", 
+        xlab = "Arrival Airport", ylim = c(0, 40000), col=colors, las = 2)
+
+```
+
+
+*\textcolor{blue}{Barplot of DayOfWeek}*
+
+```{r}
+# Bar graph of DayOfWeek
+ggplot(data = airlines) +
+  geom_bar(mapping = aes(x = DayOfWeek), fill = "darkblue")
+```
+
+From the bar graph of "DayOfWeek" it is interesting to note that the majority of flights tend to travel during the third, fourth, and fifth days of the week (Wednesday, Thursday, and Friday). For some reason Wednesday is the busiest day for air travel.
+
+*\textcolor{blue}{Split Data based on Delay}*
+
+```{r}
+# Subset DF by delayed and not delayed flights
+timelyFlights <- subset(airlines, Delay == 0)
+delayedFlights <- subset(airlines, Delay == 1)
+
+# Get dimensions
+totalFlightCount <- dim(airlines)[1]
+timelyFlightCount <- dim(timelyFlights)[1]
+delayedFlightCount <- dim(delayedFlights)[1]
+
+# Get percentages
+percentOnTime <- round(timelyFlightCount/totalFlightCount, 4)   # 55.46%
+percentDelayed <- round(delayedFlightCount/totalFlightCount, 4) # 44.54%
+
+percentOnTime
+percentDelayed
+```
+
+After sub-setting the data set into delayed flights and timely flights we can use the observed dimensions of the split data to find the proportions of delayed and on time flights. We learn that the distribution of delayed and timely flights is relatively even, with roughly 55% of the flights departing on time and 45% of the flights getting delayed.
+
+*\textcolor{blue}{Bar graph of Delays by Airline}*
+
+```{r}
+# Bar Plot of Delayed Flight counts per Airlines
+ggplot(delayedFlights,aes(x = fct_infreq(Airline))) + 
+  geom_bar(stat = 'count', fill='darkblue') + theme_minimal() + 
+  labs(x = "Airline", title = "Delayed Flights")
+```
+
+Using the delayed flights data frame, we can observe the airlines with the most delayed flights. Not surprisingly, Southwest has the largest amount of delayed flights, nearly tripling the runner-up: Delta. On the other hand, Hawaiian Airlines has the least amount of delays. This could be because the airline doesn't generally charter as many planes as other airlines.
+
+*\textcolor{blue}{Contingency Table and Barplot of Airlines based on Delays}*
+
+```{r}
+# Contingency Tables
+
+# Make table from the Delay and Airline features
+delaysByAirlineTable <- table(airlines$Delay, airlines$Airline)
+
+# Get Percentage of Delays (1) and No Delays (0) within each Airline
+round(prop.table(delaysByAirlineTable, margin = 2)*100, 1)
+
+# Get Totals of Delays (1) and No Delays (0) flights for each Airline
+delaysByAirlineTable2 <- addmargins(A = delaysByAirlineTable, 
+                                    FUN = list(total = sum), quiet = TRUE)
+# delaysByAirlineTable2
+
+# Plot Delays by Airline in Bar plot
+colors <- c("darkblue", "red")
+barplot(delaysByAirlineTable, col=colors, beside = TRUE, las = 2, cex.names = 1, 
+        xlab = "Airlines", ylab = "Frequencies");
+legend("topleft", legend = c("No", "Yes"), fill = colors)
+```
+
+Using a contingency table to construct a bar plot displaying delayed and timely flights for each airline paints an even better picture. Here, we are able to see the proportions of on time and delayed flights for each airline. Using this plot we can tell airlines such as YV, OH, and AS generally perform better when dealing with delays. This may be because of a small amount of data available on those particular airlines in the data set. Before we could tell that Southwest (WN) had the most delays, but now we can see that more than two-thirds of their flights get delayed.
+
+*\textcolor{blue}{Bar Plot for the top 20 or so busiest Departure and Arrival Airports}*
+
+**\textcolor{blue}{Data Preparation}**
+
+```{r}
+# Check if any missing values are in the data set
+sum(is.na(airlines)) # 0
+```
+
+```{r}
+# Get unique from AirportFrom and AirportTo using dplyr method
+n_distinct(airlines$AirportFrom)
+n_distinct(airlines$AirportTo)
+n_distinct(airlines$Flight)
+```
+
+Thankfully, there are no missing values in the data set. Since AirportFrom and AirportTo have 293 unique values, some classification algorithms such as Random Forest may fail due to the many classes contained within those features. In order to avoid this issue further on, regions and states for each airport were extracted from an airports data set using JavaScript (ref_link: #). This resulted in the addition of the following features to the data set: StateFrom, StateTo, RegionFrom, RegionTo.
+
+*\textcolor{blue}{New Feature Proportion Tables based on Delays}*
+
+```{r}
+# Get Percentage of Delays (1) and No Delays (0) for each Table
+
+# State From
+delaysByStateFromTable <- table(airlines$Delay, airlines$StateFrom)
+round(prop.table(delaysByStateFromTable, margin = 2)*100, 1)
+
+# State To
+delaysByStateToTable <- table(airlines$Delay, airlines$StateTo)
+round(prop.table(delaysByStateToTable, margin = 2)*100, 1)
+
+# Region From
+delaysByRegionFromTable <- table(airlines$Delay, airlines$RegionFrom)
+round(prop.table(delaysByRegionFromTable, margin = 2)*100, 1)
+
+# Region To
+delaysByRegionToTable <- table(airlines$Delay, airlines$RegionTo)
+round(prop.table(delaysByRegionToTable, margin = 2)*100, 1)
+
+```
+
+*\textcolor{blue}{Barplot of RegionFrom and RegionTo based on Delays}*
+
+
+```{r}
+colors <- c("darkblue", "red")
+
+# Region From Bar plot
+barplot(delaysByRegionFromTable, col=colors, beside = TRUE, las = 2, 
+        cex.names = 0.5, main = "Delays Based on Departing Region");
+legend("topleft", legend = c("No", "Yes"), fill = colors)
+
+# Region To Bar plot
+barplot(delaysByRegionToTable, col=colors, beside = TRUE, las = 2, 
+        cex.names = 0.5, main = "Delays Based on Arriving Region");
+legend("topleft", legend = c("No", "Yes"), fill = colors)
+```
+
+*\textcolor{blue}{Check for Multicollinearity}*
+
+```{r}
+# Multicollinearity can only be performed on numeric values
+numericFeatures <- subset(x = airlines, select = c("Flight", "DayOfWeek", 
+                                                   "Time", "Length", "Delay"))
+numCorr <- cor(numericFeatures)
+corrplot(numCorr, method="number")
+```
+
+The only noticeable correlation among the numeric variables is between Length and Flight, which are negatively correlated with a value of -0.34. Every other numeric variable display no significant correlations. Unfortunately, I do not believe the correlation of -0.34 means anything because it seems that the values in the Flight feature are the Flight Numbers of the Airlines.
+
+*\textcolor{blue}{Convert necessary variables to factors}*
+
+```{r}
+# Convert categorical variables to factor and numeric data types
+airlines$Airline <- as.factor(airlines$Airline)
+airlines$AirportTo <- as.factor(airlines$AirportTo)
+airlines$AirportFrom <- as.factor(airlines$AirportFrom)
+airlines$DayOfWeek <- as.factor(airlines$DayOfWeek)
+airlines$Delay <- as.factor(airlines$Delay)
+airlines$StateFrom <- as.factor(airlines$StateFrom)
+airlines$StateTo <- as.factor(airlines$StateTo)
+airlines$RegionFrom <- as.factor(airlines$RegionFrom)
+airlines$RegionTo <- as.factor(airlines$RegionTo)
+
+```
+
+*\textcolor{blue}{Split the Data into Test and Train sets}*
+
+```{r}
+set.seed(21)
+
+# Identify number of records in data set
+rows <- dim(airlines)[1]    # 539382
+
+# Split data set into test and train
+train_ind <- runif(rows) < 0.75
+airlinesTrain <- airlines[ train_ind, ]
+airlinesTest <- airlines[ !train_ind, ]
+
+# Confirm it was split correctly
+dim(airlinesTrain)
+dim(airlinesTest)
+```
+
+The data was separated based on a 75-25 split. With the training data containing the larger portion.
+
+**\textcolor{blue}{Modeling}**
+
+*\textcolor{blue}{Decision Tree Classification: CART}*
+
+```{r}
+# CART Model
+library(rpart)
+library(rpart.plot)
+
+# Build CART model
+cart01 <- rpart(formula = Delay ~ Airline + AirportTo + AirportFrom + 
+                  DayOfWeek + StateFrom + StateTo + RegionFrom + RegionTo + 
+                  Length, 
+                data = airlinesTrain, method = "class")
+
+# rpart.plot(cart01, type=4, extra=2)
+
+# Get Test data
+treeTest <- data.frame(Airline = airlinesTest$Airline, 
+                       AirportFrom = airlinesTest$AirportFrom, 
+                       AirportTo = airlinesTest$AirportTo, 
+                       DayOfWeek = airlinesTest$DayOfWeek, 
+                       StateFrom = airlinesTest$StateFrom, 
+                       StateTo = airlinesTest$StateTo,
+                       RegionFrom = airlinesTest$RegionFrom, 
+                       RegionTo = airlinesTest$RegionTo, 
+                       Length = airlinesTest$Length)
+
+# Get Predictions using CART model
+cartPred <- predict(object = cart01, newdata = treeTest, type = "class")
+
+# Get Confusion Matrix
+cmCart<-confusionMatrix(table(airlinesTest$Delay, cartPred))
+
+# Get Metrics
+cartMetrics <- data.frame(Accuracy = cmCart$overall['Accuracy'],
+                          Sensitivity = cmCart$byClass['Sensitivity'],
+                          Specificity = cmCart$byClass['Specificity'],
+                          Precision = cmCart$byClass['Precision'],
+                          F1 = cmCart$byClass['F1'])
+row.names(cartMetrics) <- c("CART")
+# cartMetrics
+
+# Evaluate with OneR
+eval_model(airlinesTest$Delay, cartPred) # Accuracy = 0.6287
+```
+
+*\textcolor{blue}{Decision Tree Classification: C5.0}*
+
+```{r}
+# C5.0 Model
+library(C50)
+
+# Build C5.0 Model
+C5 <- C5.0(formula = Delay ~ Airline + AirportTo + AirportFrom + DayOfWeek + 
+             StateFrom + StateTo + RegionFrom + RegionTo + Length, 
+           data = airlinesTrain)
+
+# Get Predictions using C5.0 model
+c5Pred <- predict(object = C5, newdata = treeTest)
+
+# Get Confusion Matrix
+cmC5 <-confusionMatrix(table(airlinesTest$Delay, c5Pred))
+
+# Get Metrics
+c5Metrics <- data.frame(Accuracy = cmC5$overall['Accuracy'],
+                          Sensitivity = cmC5$byClass['Sensitivity'],
+                          Specificity = cmC5$byClass['Specificity'],
+                          Precision = cmC5$byClass['Precision'],
+                          F1 = cmC5$byClass['F1'])
+row.names(c5Metrics) <- c("C5.0")
+# c5Metrics
+
+# Evaluate with OneR
+eval_model(airlinesTest$Delay, c5Pred) # Accuracy = 0.648
+```
+
+*\textcolor{blue}{Random Forest}*
+
+```{r}
+# Random Forest Model
+library(randomForest)
+
+# Build RandomForest Model
+# Removed AirportTo, AirportFrom since more than 53 categories
+rf01 <- randomForest(formula = Delay ~ Airline + DayOfWeek + StateFrom + 
+                       StateTo + RegionFrom + RegionTo + Length, 
+                     data = airlinesTrain, ntree = 100, type = "classification")
+
+# Get test features for Random Forest not including AirportFrom and AirportTo
+rfTest <- subset(x = airlinesTest, select = c("Airline", "DayOfWeek", 
+                                              "StateFrom", "StateTo", 
+                                              "RegionFrom", "RegionTo", 
+                                              "Length"))
+
+# Get predictions using Random Forest
+rfPred <- predict(object = rf01, newdata = rfTest)
+
+# Get Confusion Matrix
+cmRf <-confusionMatrix(table(airlinesTest$Delay, rfPred))
+
+# Get Metrics
+rfMetrics <- data.frame(Accuracy = cmRf$overall['Accuracy'],
+                          Sensitivity = cmRf$byClass['Sensitivity'],
+                          Specificity = cmRf$byClass['Specificity'],
+                          Precision = cmRf$byClass['Precision'],
+                          F1 = cmRf$byClass['F1'])
+row.names(rfMetrics) <- c("Random Forest")
+# rfMetrics
+
+# Evaluate with OneR
+eval_model(airlinesTest$Delay, rfPred) # Accuracy = 0.647
+```
+
+*\textcolor{blue}{Naive Bayes}*
+
+```{r}
+# Naive Bayes Model
+library(e1071)
+
+# Build Naive Bayes Model
+nb01 <- naiveBayes(formula = Delay ~ Airline + AirportFrom + AirportTo + 
+                     DayOfWeek + StateFrom + StateTo + RegionFrom + RegionTo + 
+                     Length, data = airlinesTrain)
+
+# Get predictions on test set
+nbPred <- predict(object = nb01, newdata = treeTest)
+
+# Get Confusion Matrix
+cmNb <-confusionMatrix(table(airlinesTest$Delay, nbPred))
+
+# Get Metrics
+nbMetrics <- data.frame(Accuracy = cmNb$overall['Accuracy'],
+                          Sensitivity = cmNb$byClass['Sensitivity'],
+                          Specificity = cmNb$byClass['Specificity'],
+                          Precision = cmNb$byClass['Precision'],
+                          F1 = cmNb$byClass['F1'])
+row.names(nbMetrics) <- c("Naive Bayes")
+# nbMetrics
+
+# Use OneR to evaluate
+eval_model(airlinesTest$Delay, nbPred) # Accuracy = 0.609
+```
+
+*\textcolor{blue}{Neural Network}*
+
+```{r}
+# Neural Network Model
+library(nnet) 
+library(NeuralNetTools)
+
+# Build Neural Network Model
+nnet01 <- nnet(formula = Delay ~ Airline + DayOfWeek + RegionFrom + RegionTo + Length, 
+               data = airlinesTrain, size = 5, MaxNWts = 10000)
+```
+
+```{r}
+# Plot Nnet
+plotnet(nnet01)
+```
+
+```{r}
+# Get Test set for Neural net
+nnetTest <- subset(x = airlinesTest, select = c("Airline", "DayOfWeek",
+                                              "RegionFrom", "RegionTo", 
+                                              "Length"))
+
+# Get predictions on test set using Neural Net
+nnetPred <- predict(nnet01, nnetTest, type="class")
+
+# Get Confusion Matrix, use RandomForest test set
+cmNnet <-confusionMatrix(table(airlinesTest$Delay, nnetPred))
+
+# Get Metrics
+nnetMetrics <- data.frame(Accuracy = cmNnet$overall['Accuracy'],
+                          Sensitivity = cmNnet$byClass['Sensitivity'],
+                          Specificity = cmNnet$byClass['Specificity'],
+                          Precision = cmNnet$byClass['Precision'],
+                          F1 = cmNnet$byClass['F1'])
+row.names(nnetMetrics) <- c("Neural Network")
+# nnetMetrics
+
+# Use OneR to evaluate
+eval_model(airlinesTest$Delay, nnetPred) 
+# with RegionFrom + RegionTo: Accuracy = 0.5924, 
+  # with 5 hidden layers: Accuracy = 0.6317...
+  # with 2 hidden layers: Accuracy = 0.6
+# with StateFrom + StateTo: Accuracy = 0.647 ***
+  # with 5 hidden layers: Accuracy = 0.6084
+  # with 2 hidden layers: Accuracy = 0.6349
+# with AirportFrom + AirportTo: Accuracy = 0.6394
+```
+
+**\textcolor{blue}{Evaluation}**
+
+*\textcolor{blue}{Build Performance Metrics Data Frame}*
+
+```{r}
+# Evaluation
+
+# Combine Model Performance Metrics
+performanceMetrics <- rbind(cartMetrics, c5Metrics, rfMetrics, nbMetrics, nnetMetrics)
+
+# Make Pretty Table
+knitr::kable(performanceMetrics) %>%
+  kable_styling(latex_options = "striped")
+
+```
+
+
+
